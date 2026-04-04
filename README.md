@@ -106,7 +106,7 @@ Built for students — works on mobile & desktop — no installation required.
 | Google Fonts | Syne + DM Sans |
 | GitHub Pages | Free permanent hosting |
 
-> Zero dependencies — no React, no Node.js, no server, no database. Entire app in one HTML file.
+> Firebase powered — secure authentication, real-time Firestore database & permanent cloud storage. Entire app in one HTML file.
 
 ---
 
