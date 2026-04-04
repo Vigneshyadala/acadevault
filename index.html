@@ -39,6 +39,7 @@ let certs = [];
 onAuthStateChanged(auth, async (user) => {
   if (user) {
     currentUser = user;
+    window.currentUser = user;
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('dashboard').style.display = 'block';
     document.getElementById('user-name-chip').textContent = user.displayName || user.email.split('@')[0];
@@ -52,6 +53,7 @@ onAuthStateChanged(auth, async (user) => {
     }
   } else {
     currentUser = null;
+    window.currentUser = null;
     document.getElementById('login-screen').style.display = 'flex';
     document.getElementById('dashboard').style.display = 'none';
   }
@@ -965,6 +967,7 @@ function copyLink(){
 
 function loadProfileFields(){
   if(window._profileLoaded)return;
+  const currentUser = window.currentUser;
   if(currentUser){
     const ef=document.getElementById('pf-email');
     if(ef&&!ef.value)ef.value=currentUser.email;
@@ -990,7 +993,7 @@ function updateProfileHero(){
   const initials=name.split(' ').filter(Boolean).map(w=>w[0]).join('').slice(0,2).toUpperCase()||'--';
   const initEl=document.getElementById('profile-avatar-initials');
   if(initEl&&!document.querySelector('#profile-avatar-big img.pphoto'))initEl.textContent=initials;
-  if(currentUser){document.getElementById('user-name-chip').textContent=name==='—'?currentUser.displayName||currentUser.email:name;}
+  if(window.currentUser){document.getElementById('user-name-chip').textContent=name==='—'?window.currentUser.displayName||window.currentUser.email:name;}
   const av=document.getElementById('user-avatar');
   if(av&&!av.querySelector('img'))av.textContent=initials;
 }
