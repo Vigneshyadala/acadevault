@@ -12,6 +12,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendEmailVerification, sendPasswordResetEmail, onAuthStateChanged, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { getFirestore, doc, setDoc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 // Storage removed - using Firestore base64 storage (free plan compatible)
+// Storage removed - using Firestore base64 storage (free plan compatible)
 
 // ============================================================
 // 🔥 FIREBASE CONFIG — Replace with YOUR config from Firebase Console
@@ -183,8 +184,9 @@ window.saveProfile = async function() {
     phone: document.getElementById('pf-phone')?.value || '',
     whatsapp: document.getElementById('pf-whatsapp')?.value || '',
     address: document.getElementById('pf-address')?.value || '',
-    pin: document.getElementById('pf-pin')?.value || '',
+    state: document.getElementById('pf-state')?.value || '',
     city: document.getElementById('pf-city')?.value || '',
+    pin: document.getElementById('pf-pin')?.value || '',
     college: document.getElementById('pf-college')?.value || '',
     dept: document.getElementById('pf-dept')?.value || '',
     degree: document.getElementById('pf-degree')?.value || '',
@@ -210,64 +212,84 @@ window.saveProfile = async function() {
 };
 
 function restoreProfile(p) {
-  const fields = ['name','dob','gender','blood','bio','email','phone','whatsapp','address','pin','city','college','dept','degree','roll','adm','sem','admyear','cgpa','linkedin','github','portfolio','skills'];
-  fields.forEach(f => { const el = document.getElementById('pf-'+f); if(el && p[f]) el.value = p[f]; });
+  const textFields = ['name','dob','gender','blood','bio','email','phone','whatsapp','address','college','dept','degree','roll','adm','sem','admyear','cgpa','linkedin','github','portfolio','skills'];
+  textFields.forEach(f => { const el = document.getElementById('pf-'+f); if(el && p[f]) el.value = p[f]; });
+  // Restore state → city → pin chain
+  if (p.state) {
+    const stateEl = document.getElementById('pf-state');
+    if (stateEl) {
+      stateEl.value = p.state;
+      loadCities(p.city, p.pin);
+    }
+  }
   updateProfileHero();
 }
 
-// ---- FILE UPLOAD — Firestore base64 (free plan, no Storage needed) ----
+// ---- IMAGE COMPRESSION ----
+async function compressFile(file) {
+  if (file.type === 'application/pdf') {
+    return await new Promise(res => { const r = new FileReader(); r.onload = e => res(e.target.result); r.readAsDataURL(file); });
+  }
+  return await new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement('canvas');
+      let w = img.width, h = img.height, MAX = 1200;
+      if (w > MAX || h > MAX) { if (w > h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      let q = 0.78, dataUrl = canvas.toDataURL('image/jpeg', q);
+      while (dataUrl.length > 1000000 && q > 0.3) { q -= 0.1; dataUrl = canvas.toDataURL('image/jpeg', q); }
+      resolve(dataUrl);
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+// ---- FILE UPLOAD — Firestore base64 with auto-compression ----
 window.handleUpload = async function(key) {
   const f = document.getElementById('file-'+key).files[0];
   if (!f || !window.currentUser) return;
-  if (f.size > 900000) { showToast('⚠️ File too large. Max 900KB per file.', 'warning'); return; }
-  showToast('⬆️ Uploading...', 'info');
-  const reader = new FileReader();
-  reader.onload = async (e) => {
-    try {
-      docs[key] = { name: f.name, size: (f.size/1024).toFixed(1)+'KB', type: f.type, data: e.target.result, date: new Date().toLocaleDateString('en-IN') };
-      renderDoc(key);
-      updateStats(); renderHomeSems(); updateHomeMeta();
-      await saveUserData();
-      showToast('✅ Document uploaded & saved!', 'success');
-    } catch(err) { showToast('❌ Upload failed. Try again.', 'error'); console.error(err); }
-  };
-  reader.readAsDataURL(f);
+  if (f.size > 5 * 1024 * 1024) { showToast('⚠️ File too large. Max 5MB per file.', 'warning'); return; }
+  showToast(f.type.startsWith('image/') ? '⬆️ Compressing & uploading...' : '⬆️ Uploading...', 'info');
+  try {
+    const dataUrl = await compressFile(f);
+    const sizeKB = Math.round(dataUrl.length * 0.75 / 1024);
+    docs[key] = { name: f.name, size: sizeKB > 1024 ? (sizeKB/1024).toFixed(1)+'MB' : sizeKB+'KB', type: f.type.startsWith('image/') ? 'image/jpeg' : f.type, data: dataUrl, date: new Date().toLocaleDateString('en-IN') };
+    renderDoc(key); updateStats(); renderHomeSems(); updateHomeMeta();
+    await saveUserData();
+    showToast('✅ Document uploaded & saved!', 'success');
+  } catch(err) { showToast('❌ Upload failed: ' + (err?.message || 'Try again'), 'error'); console.error(err); }
 };
 
 window.removeDoc = async function(key) {
   if (!window.currentUser) return;
   delete docs[key];
-  const v = document.getElementById('view-'+key);
-  const d = document.getElementById('drop-'+key);
+  const v = document.getElementById('view-'+key); const d = document.getElementById('drop-'+key);
   if(v) v.innerHTML=''; if(d) d.style.display='';
   updateStats(); renderHomeSems(); updateHomeMeta();
-  await saveUserData();
-  showToast('🗑️ Document removed.', 'info');
+  await saveUserData(); showToast('🗑️ Document removed.', 'info');
 };
 
 window.handleCertUpload = async function() {
   const f = document.getElementById('file-cert').files[0];
   if (!f || !window.currentUser) return;
-  if (f.size > 900000) { showToast('⚠️ File too large. Max 900KB per cert.', 'warning'); return; }
-  showToast('⬆️ Uploading certificate...', 'info');
-  const reader = new FileReader();
-  reader.onload = async (e) => {
-    try {
-      const certId = 'cert_' + Date.now();
-      certs.push({ id: certId, name: f.name, size: (f.size/1024).toFixed(1)+'KB', type: f.type, data: e.target.result, date: new Date().toLocaleDateString('en-IN') });
-      renderCerts(); updateStats();
-      await saveUserData();
-      showToast('✅ Certificate saved!', 'success');
-    } catch(err) { showToast('❌ Upload failed.', 'error'); }
-  };
-  reader.readAsDataURL(f);
+  if (f.size > 5 * 1024 * 1024) { showToast('⚠️ File too large. Max 5MB.', 'warning'); return; }
+  showToast(f.type.startsWith('image/') ? '⬆️ Compressing & uploading...' : '⬆️ Uploading...', 'info');
+  try {
+    const dataUrl = await compressFile(f);
+    const sizeKB = Math.round(dataUrl.length * 0.75 / 1024);
+    certs.push({ id: 'cert_'+Date.now(), name: f.name, size: sizeKB > 1024 ? (sizeKB/1024).toFixed(1)+'MB' : sizeKB+'KB', type: f.type.startsWith('image/') ? 'image/jpeg' : f.type, data: dataUrl, date: new Date().toLocaleDateString('en-IN') });
+    renderCerts(); updateStats(); await saveUserData(); showToast('✅ Certificate saved!', 'success');
+  } catch(err) { showToast('❌ Upload failed: ' + (err?.message || 'Try again'), 'error'); console.error(err); }
 };
 
 window.removeCert = async function(i) {
   if (!window.currentUser) return;
-  certs.splice(i,1);
-  renderCerts(); updateStats();
-  await saveUserData();
+  certs.splice(i,1); renderCerts(); updateStats(); await saveUserData();
 };
 
 // ---- HELPERS ----
@@ -287,6 +309,67 @@ function showToast(msg, type='info') {
   toast._t = setTimeout(()=>toast.style.opacity='0', 3500);
 }
 window.showToast = showToast;
+
+// ---- RENDER FUNCTIONS (inside module so they can access docs/certs) ----
+function renderDoc(key){
+  const d=docs[key];
+  const viewEl=document.getElementById('view-'+key);
+  const dropEl=document.getElementById('drop-'+key);
+  if(!d||!viewEl)return;
+  if(dropEl)dropEl.style.display='none';
+  const src=d.url||d.data;
+  let preview='';
+  if(d.type&&d.type.startsWith('image/')){
+    preview=`<img src="${src}" onclick="previewDoc('${src}','${d.name}','${d.type}')" style="width:100%;max-height:200px;object-fit:cover;border-radius:10px;margin-bottom:10px;cursor:pointer;transition:opacity 0.2s;" onmouseover="this.style.opacity=0.85" onmouseout="this.style.opacity=1" title="Click to preview">`;
+  }else{
+    preview=`<div onclick="previewDoc('${src}','${d.name}','${d.type}')" style="background:rgba(56,189,248,0.06);border-radius:10px;padding:1.8rem;text-align:center;margin-bottom:10px;border:1px solid rgba(56,189,248,0.2);cursor:pointer;transition:all 0.2s;" onmouseover="this.style.background='rgba(56,189,248,0.12)'" onmouseout="this.style.background='rgba(56,189,248,0.06)'" title="Click to preview"><div style="font-size:36px;margin-bottom:6px;">📄</div><div style="font-size:12px;color:var(--teal);">Click to Preview PDF</div></div>`;
+  }
+  viewEl.innerHTML=`${preview}<div style="background:var(--bg3);padding:10px 14px;border-radius:10px;border:1px solid rgba(45,212,191,0.25);"><div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;"><div><div style="font-size:12px;font-weight:500;color:var(--teal);">✅ ${d.name}</div><div style="font-size:10px;color:var(--text2);">${d.size} · Uploaded ${d.date}</div></div><div style="display:flex;gap:6px;"><button onclick="previewDoc('${src}','${d.name}','${d.type}')" style="background:rgba(56,189,248,0.12);border:1px solid rgba(56,189,248,0.3);color:var(--accent);border-radius:6px;padding:6px 12px;font-size:11px;cursor:pointer;font-weight:500;">👁 Preview</button><button onclick="downloadDoc('${src}','${d.name}')" style="background:rgba(45,212,191,0.12);border:1px solid rgba(45,212,191,0.3);color:var(--teal);border-radius:6px;padding:6px 12px;font-size:11px;cursor:pointer;font-weight:500;">⬇ Download</button><button onclick="removeDoc('${key}')" style="background:rgba(251,113,133,0.1);border:1px solid rgba(251,113,133,0.25);color:var(--rose);border-radius:6px;padding:6px 12px;font-size:11px;cursor:pointer;">🗑 Remove</button></div></div></div>`;
+}
+window.renderDoc = renderDoc;
+
+function renderCerts(){
+  const el=document.getElementById('cert-list');
+  if(!el)return;
+  if(!certs.length){el.innerHTML='<div style="text-align:center;padding:2rem;color:var(--text2);font-size:13px;">No certificates added yet. Click "+ Add Certificate" to get started!</div>';return;}
+  el.innerHTML=certs.map((c,i)=>{
+    const src=c.url||c.data;
+    const isImg=c.type&&c.type.startsWith('image/');
+    const previewThumb=isImg?`<img src="${src}" style="width:48px;height:48px;object-fit:cover;border-radius:8px;margin-right:12px;cursor:pointer;border:1px solid rgba(56,189,248,0.2);" onclick="previewDoc('${src}','${c.name}','${c.type}')" title="Preview">`:`<div onclick="previewDoc('${src}','${c.name}','${c.type}')" style="width:48px;height:48px;border-radius:8px;background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.2);display:flex;align-items:center;justify-content:center;font-size:22px;margin-right:12px;cursor:pointer;flex-shrink:0;" title="Preview">📄</div>`;
+    return `<div class="file-item" style="align-items:center;">${previewThumb}<div style="flex:1;min-width:0;"><div class="file-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${c.name}</div><div class="file-meta">${c.size} · ${c.date}</div></div><div style="display:flex;gap:6px;flex-shrink:0;margin-left:8px;"><button onclick="previewDoc('${src}','${c.name}','${c.type}')" style="background:rgba(56,189,248,0.12);border:1px solid rgba(56,189,248,0.3);color:var(--accent);border-radius:6px;padding:6px 10px;font-size:11px;cursor:pointer;font-weight:500;">👁 Preview</button><button onclick="downloadDoc('${src}','${c.name}')" style="background:rgba(45,212,191,0.12);border:1px solid rgba(45,212,191,0.3);color:var(--teal);border-radius:6px;padding:6px 10px;font-size:11px;cursor:pointer;font-weight:500;">⬇ Download</button><button onclick="removeCert(${i})" style="background:rgba(251,113,133,0.1);border:1px solid rgba(251,113,133,0.25);color:var(--rose);border-radius:6px;padding:6px 10px;font-size:11px;cursor:pointer;">🗑</button></div></div>`;
+  }).join('');
+}
+window.renderCerts = renderCerts;
+
+function updateStats(){
+  const semKeys=['sem1','sem2','sem3','sem4','sem5','sem6','sem7','sem8'];
+  const su=semKeys.filter(k=>docs[k]).length;
+  const aadhaarCount=(docs['aadhaar-front']?1:0)+(docs['aadhaar-back']?1:0);
+  const total=(docs['10th']?1:0)+(docs['inter']?1:0)+su+certs.length+aadhaarCount;
+  const pct=Math.round((total/14)*100);
+  const el1=document.getElementById('stat-total');if(el1)el1.textContent=total;
+  const el2=document.getElementById('stat-complete');if(el2)el2.textContent=pct+'%';
+  const el3=document.getElementById('stat-sems');if(el3)el3.textContent=su+'/8';
+  const el4=document.getElementById('stat-certs');if(el4)el4.textContent=certs.length;
+}
+window.updateStats = updateStats;
+
+function renderHomeSems(){
+  const keys=['sem1','sem2','sem3','sem4','sem5','sem6','sem7','sem8'];
+  const g=document.getElementById('home-sem-grid');if(!g)return;
+  g.innerHTML=keys.map((k,i)=>`<div class="sem-card ${docs[k]?'has-file':''}" onclick="showPage('btech')"><div class="sem-num">S${i+1}</div><div class="sem-sub">Sem ${i+1}</div><div class="sem-dot"></div></div>`).join('');
+}
+window.renderHomeSems = renderHomeSems;
+
+function updateHomeMeta(){
+  const s10=document.getElementById('home-10th-status');const m10=document.getElementById('home-10th-meta');
+  const si=document.getElementById('home-inter-status');const mi=document.getElementById('home-inter-meta');
+  const sa=document.getElementById('home-aadhaar-status');const ma=document.getElementById('home-aadhaar-meta');
+  if(s10){if(docs['10th']){s10.textContent='Uploaded';s10.className='file-status status-ok';if(m10)m10.textContent=docs['10th'].date;}else{s10.textContent='Pending';s10.className='file-status status-empty';if(m10)m10.textContent='Not uploaded';}}
+  if(si){if(docs['inter']){si.textContent='Uploaded';si.className='file-status status-ok';if(mi)mi.textContent=docs['inter'].date;}else{si.textContent='Pending';si.className='file-status status-empty';if(mi)mi.textContent='Not uploaded';}}
+  if(sa){const hasAadhaar=docs['aadhaar-front']||docs['aadhaar-back'];if(hasAadhaar){sa.textContent='Uploaded';sa.className='file-status status-ok';if(ma)ma.textContent=(docs['aadhaar-front']&&docs['aadhaar-back'])?'Both sides uploaded':'1 side uploaded';}else{sa.textContent='Pending';sa.className='file-status status-empty';if(ma)ma.textContent='Not uploaded';}}
+}
+window.updateHomeMeta = updateHomeMeta;
 
 </script>
 
@@ -842,11 +925,37 @@ input[type=file]{display:none;}
         <div class="profile-card">
           <div class="profile-card-title">📬 Contact Information</div>
           <div class="pfield"><label>Email Address</label><input type="email" id="pf-email" placeholder="your@email.com"></div>
-          <div class="pfield"><label>Phone Number</label><input type="tel" id="pf-phone" placeholder="+91 9876543210"></div>
-          <div class="pfield"><label>WhatsApp Number</label><input type="tel" id="pf-whatsapp" placeholder="+91 9876543210"></div>
-          <div class="pfield"><label>Address</label><textarea id="pf-address" rows="2" placeholder="Street, City, State..."></textarea></div>
-          <div class="pfield"><label>Pin Code</label><input type="text" id="pf-pin" placeholder="500001"></div>
-          <div class="pfield"><label>City / State</label><input type="text" id="pf-city" placeholder="Hyderabad, Telangana"></div>
+          <div class="pfield"><label>Phone Number</label><input type="tel" id="pf-phone" placeholder="+91 9876543210" oninput="syncWhatsApp()"></div>
+          <div class="pfield">
+            <label style="display:flex;align-items:center;justify-content:space-between;">
+              WhatsApp Number
+              <label style="display:flex;align-items:center;gap:5px;font-size:11px;font-weight:400;color:var(--teal);cursor:pointer;">
+                <input type="checkbox" id="wa-same" onchange="toggleWhatsApp(this)" style="accent-color:var(--teal);width:13px;height:13px;">
+                Same as Phone
+              </label>
+            </label>
+            <input type="tel" id="pf-whatsapp" placeholder="+91 9876543210">
+          </div>
+          <div class="pfield"><label>Address</label><textarea id="pf-address" rows="2" placeholder="Street, Area..."></textarea></div>
+          <div class="pfield">
+            <label>State</label>
+            <select id="pf-state" onchange="loadCities()">
+              <option value="">— Select State —</option>
+              <option>Andhra Pradesh</option><option>Arunachal Pradesh</option><option>Assam</option><option>Bihar</option><option>Chhattisgarh</option><option>Goa</option><option>Gujarat</option><option>Haryana</option><option>Himachal Pradesh</option><option>Jharkhand</option><option>Karnataka</option><option>Kerala</option><option>Madhya Pradesh</option><option>Maharashtra</option><option>Manipur</option><option>Meghalaya</option><option>Mizoram</option><option>Nagaland</option><option>Odisha</option><option>Punjab</option><option>Rajasthan</option><option>Sikkim</option><option>Tamil Nadu</option><option>Telangana</option><option>Tripura</option><option>Uttar Pradesh</option><option>Uttarakhand</option><option>West Bengal</option><option>Andaman &amp; Nicobar Islands</option><option>Chandigarh</option><option>Dadra &amp; Nagar Haveli and Daman &amp; Diu</option><option>Delhi</option><option>Jammu &amp; Kashmir</option><option>Ladakh</option><option>Lakshadweep</option><option>Puducherry</option>
+            </select>
+          </div>
+          <div class="pfield">
+            <label>City</label>
+            <select id="pf-city" onchange="loadPincodes()">
+              <option value="">— Select State first —</option>
+            </select>
+          </div>
+          <div class="pfield">
+            <label>Pin Code</label>
+            <select id="pf-pin">
+              <option value="">— Select City first —</option>
+            </select>
+          </div>
         </div>
         <!-- Academic Info -->
         <div class="profile-card">
@@ -977,86 +1086,8 @@ function downloadDoc(data, name) {
   a.click();
 }
 
-function renderDoc(key){
-  const d=docs[key];
-  const viewEl=document.getElementById('view-'+key);
-  const dropEl=document.getElementById('drop-'+key);
-  if(!d||!viewEl)return;
-  if(dropEl)dropEl.style.display='none';
-  const src = d.url||d.data;
-  let preview='';
-  if(d.type&&d.type.startsWith('image/')){
-    preview=`<img src="${src}" onclick="previewDoc('${src}','${d.name}','${d.type}')" style="width:100%;max-height:200px;object-fit:cover;border-radius:10px;margin-bottom:10px;cursor:pointer;transition:opacity 0.2s;" onmouseover="this.style.opacity=0.85" onmouseout="this.style.opacity=1" title="Click to preview">`;
-  }else{
-    preview=`<div onclick="previewDoc('${src}','${d.name}','${d.type}')" style="background:rgba(56,189,248,0.06);border-radius:10px;padding:1.8rem;text-align:center;margin-bottom:10px;border:1px solid rgba(56,189,248,0.2);cursor:pointer;transition:all 0.2s;" onmouseover="this.style.background='rgba(56,189,248,0.12)'" onmouseout="this.style.background='rgba(56,189,248,0.06)'" title="Click to preview"><div style="font-size:36px;margin-bottom:6px;">📄</div><div style="font-size:12px;color:var(--teal);">Click to Preview PDF</div></div>`;
-  }
-  viewEl.innerHTML=`${preview}
-  <div style="background:var(--bg3);padding:10px 14px;border-radius:10px;border:1px solid rgba(45,212,191,0.25);">
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
-      <div><div style="font-size:12px;font-weight:500;color:var(--teal);">✅ ${d.name}</div><div style="font-size:10px;color:var(--text2);">${d.size} · Uploaded ${d.date}</div></div>
-      <div style="display:flex;gap:6px;">
-        <button onclick="previewDoc('${src}','${d.name}','${d.type}')" style="background:rgba(56,189,248,0.12);border:1px solid rgba(56,189,248,0.3);color:var(--accent);border-radius:6px;padding:6px 12px;font-size:11px;cursor:pointer;font-weight:500;">👁 Preview</button>
-        <button onclick="downloadDoc('${src}','${d.name}')" style="background:rgba(45,212,191,0.12);border:1px solid rgba(45,212,191,0.3);color:var(--teal);border-radius:6px;padding:6px 12px;font-size:11px;cursor:pointer;font-weight:500;">⬇ Download</button>
-        <button onclick="removeDoc('${key}')" style="background:rgba(251,113,133,0.1);border:1px solid rgba(251,113,133,0.25);color:var(--rose);border-radius:6px;padding:6px 12px;font-size:11px;cursor:pointer;">🗑 Remove</button>
-      </div>
-    </div>
-  </div>`;
-}
-
-function renderCerts(){
-  const el=document.getElementById('cert-list');
-  if(!certs.length){el.innerHTML='<div style="text-align:center;padding:2rem;color:var(--text2);font-size:13px;">No certificates added yet. Click "+ Add Certificate" to get started!</div>';return;}
-  el.innerHTML=certs.map((c,i)=>{
-    const src=c.url||c.data;
-    const isImg=c.type&&c.type.startsWith('image/');
-    const previewThumb=isImg?`<img src="${src}" style="width:48px;height:48px;object-fit:cover;border-radius:8px;margin-right:12px;cursor:pointer;border:1px solid rgba(56,189,248,0.2);" onclick="previewDoc('${src}','${c.name}','${c.type}')" title="Preview">`:`<div onclick="previewDoc('${src}','${c.name}','${c.type}')" style="width:48px;height:48px;border-radius:8px;background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.2);display:flex;align-items:center;justify-content:center;font-size:22px;margin-right:12px;cursor:pointer;flex-shrink:0;" title="Preview">📄</div>`;
-    return `<div class="file-item" style="align-items:center;">
-      ${previewThumb}
-      <div style="flex:1;min-width:0;">
-        <div class="file-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${c.name}</div>
-        <div class="file-meta">${c.size} · ${c.date}</div>
-      </div>
-      <div style="display:flex;gap:6px;flex-shrink:0;margin-left:8px;">
-        <button onclick="previewDoc('${src}','${c.name}','${c.type}')" style="background:rgba(56,189,248,0.12);border:1px solid rgba(56,189,248,0.3);color:var(--accent);border-radius:6px;padding:6px 10px;font-size:11px;cursor:pointer;font-weight:500;">👁 Preview</button>
-        <button onclick="downloadDoc('${src}','${c.name}')" style="background:rgba(45,212,191,0.12);border:1px solid rgba(45,212,191,0.3);color:var(--teal);border-radius:6px;padding:6px 10px;font-size:11px;cursor:pointer;font-weight:500;">⬇ Download</button>
-        <button onclick="removeCert(${i})" style="background:rgba(251,113,133,0.1);border:1px solid rgba(251,113,133,0.25);color:var(--rose);border-radius:6px;padding:6px 10px;font-size:11px;cursor:pointer;">🗑</button>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-function updateStats(){
-  const semKeys=['sem1','sem2','sem3','sem4','sem5','sem6','sem7','sem8'];
-  const su=semKeys.filter(k=>docs[k]).length;
-  const aadhaarCount=(docs['aadhaar-front']?1:0)+(docs['aadhaar-back']?1:0);
-  const total=(docs['10th']?1:0)+(docs['inter']?1:0)+su+certs.length+aadhaarCount;
-  const pct=Math.round((total/14)*100);
-  document.getElementById('stat-total').textContent=total;
-  document.getElementById('stat-complete').textContent=pct+'%';
-  document.getElementById('stat-sems').textContent=su+'/8';
-  document.getElementById('stat-certs').textContent=certs.length;
-}
-
-function renderHomeSems(){
-  const keys=['sem1','sem2','sem3','sem4','sem5','sem6','sem7','sem8'];
-  const g=document.getElementById('home-sem-grid');if(!g)return;
-  g.innerHTML=keys.map((k,i)=>`<div class="sem-card ${docs[k]?'has-file':''}" onclick="showPage('btech')"><div class="sem-num">S${i+1}</div><div class="sem-sub">Sem ${i+1}</div><div class="sem-dot"></div></div>`).join('');
-}
-
-function updateHomeMeta(){
-  const s10=document.getElementById('home-10th-status');const m10=document.getElementById('home-10th-meta');
-  const si=document.getElementById('home-inter-status');const mi=document.getElementById('home-inter-meta');
-  const sa=document.getElementById('home-aadhaar-status');const ma=document.getElementById('home-aadhaar-meta');
-  if(docs['10th']){s10.textContent='Uploaded';s10.className='file-status status-ok';m10.textContent=docs['10th'].date;}
-  else{s10.textContent='Pending';s10.className='file-status status-empty';m10.textContent='Not uploaded';}
-  if(docs['inter']){si.textContent='Uploaded';si.className='file-status status-ok';mi.textContent=docs['inter'].date;}
-  else{si.textContent='Pending';si.className='file-status status-empty';mi.textContent='Not uploaded';}
-  if(sa){
-    const hasAadhaar=docs['aadhaar-front']||docs['aadhaar-back'];
-    if(hasAadhaar){sa.textContent='Uploaded';sa.className='file-status status-ok';ma.textContent=(docs['aadhaar-front']&&docs['aadhaar-back'])?'Both sides uploaded':'1 side uploaded';}
-    else{sa.textContent='Pending';sa.className='file-status status-empty';ma.textContent='Not uploaded';}
-  }
-}
+// renderDoc, renderCerts, updateStats, renderHomeSems, updateHomeMeta
+// are now defined inside the Firebase module and exposed via window.*
 
 function generateLink(){
   const url=window.location.href.split('?')[0]+'?share='+Math.random().toString(36).substr(2,12);
@@ -1136,6 +1167,155 @@ function visitSocial(type){
   const val=el?el.value.trim():'';
   if(val){window.open(val,'_blank');}else{el.focus();}
 }
+
+// ---- WHATSAPP SYNC ----
+function syncWhatsApp() {
+  const cb = document.getElementById('wa-same');
+  if (cb && cb.checked) {
+    const phone = document.getElementById('pf-phone').value;
+    document.getElementById('pf-whatsapp').value = phone;
+  }
+}
+function toggleWhatsApp(cb) {
+  const waEl = document.getElementById('pf-whatsapp');
+  if (cb.checked) {
+    waEl.value = document.getElementById('pf-phone').value;
+    waEl.readOnly = true;
+    waEl.style.opacity = '0.6';
+  } else {
+    waEl.readOnly = false;
+    waEl.style.opacity = '1';
+    waEl.focus();
+  }
+}
+
+// ---- STATE → CITY → PINCODE DATA ----
+const indiaCities = {
+  'Andhra Pradesh': ['Visakhapatnam','Vijayawada','Guntur','Nellore','Kurnool','Kakinada','Tirupati','Rajahmundry','Eluru','Ongole','Anantapur','Vizianagaram','Srikakulam','Chittoor','Kadapa'],
+  'Arunachal Pradesh': ['Itanagar','Naharlagun','Pasighat','Ziro','Bomdila'],
+  'Assam': ['Guwahati','Silchar','Dibrugarh','Jorhat','Nagaon','Tezpur','Tinsukia','Bongaigaon','Dhubri'],
+  'Bihar': ['Patna','Gaya','Bhagalpur','Muzaffarpur','Darbhanga','Purnia','Arrah','Begusarai','Bihar Sharif','Katihar'],
+  'Chhattisgarh': ['Raipur','Bhilai','Bilaspur','Korba','Durg','Rajnandgaon','Jagdalpur'],
+  'Goa': ['Panaji','Vasco da Gama','Margao','Mapusa','Ponda'],
+  'Gujarat': ['Ahmedabad','Surat','Vadodara','Rajkot','Bhavnagar','Jamnagar','Junagadh','Gandhinagar','Anand','Nadiad','Morbi','Mehsana','Surendranagar'],
+  'Haryana': ['Faridabad','Gurugram','Rohtak','Hisar','Panipat','Karnal','Sonipat','Yamunanagar','Ambala','Bhiwani','Panchkula'],
+  'Himachal Pradesh': ['Shimla','Manali','Dharamsala','Solan','Mandi','Kullu','Bilaspur','Hamirpur'],
+  'Jharkhand': ['Ranchi','Jamshedpur','Dhanbad','Bokaro','Deoghar','Hazaribagh','Giridih'],
+  'Karnataka': ['Bengaluru','Mysuru','Hubli','Dharwad','Belagavi','Mangaluru','Davanagere','Ballari','Vijayapura','Shivamogga','Kalaburagi','Tumakuru','Hassan','Udupi','Bidar'],
+  'Kerala': ['Thiruvananthapuram','Kochi','Kozhikode','Thrissur','Kollam','Palakkad','Alappuzha','Malappuram','Kannur','Kottayam','Kasaragod'],
+  'Madhya Pradesh': ['Bhopal','Indore','Jabalpur','Gwalior','Ujjain','Sagar','Dewas','Satna','Ratlam','Rewa'],
+  'Maharashtra': ['Mumbai','Pune','Nagpur','Nashik','Aurangabad','Solapur','Amravati','Kolhapur','Nanded','Sangli','Thane','Kalyan','Vasai-Virar','Navi Mumbai'],
+  'Manipur': ['Imphal','Thoubal','Bishnupur','Churachandpur'],
+  'Meghalaya': ['Shillong','Tura','Nongstoin'],
+  'Mizoram': ['Aizawl','Lunglei','Champhai'],
+  'Nagaland': ['Kohima','Dimapur','Mokokchung'],
+  'Odisha': ['Bhubaneswar','Cuttack','Rourkela','Brahmapur','Sambalpur','Puri','Balasore','Bhadrak'],
+  'Punjab': ['Ludhiana','Amritsar','Jalandhar','Patiala','Bathinda','Mohali','Firozpur','Hoshiarpur','Gurdaspur','Pathankot'],
+  'Rajasthan': ['Jaipur','Jodhpur','Udaipur','Kota','Bikaner','Ajmer','Bharatpur','Alwar','Bhilwara','Sikar'],
+  'Sikkim': ['Gangtok','Namchi','Geyzing'],
+  'Tamil Nadu': ['Chennai','Coimbatore','Madurai','Tiruchirappalli','Salem','Tirunelveli','Tiruppur','Vellore','Erode','Thoothukkudi','Thanjavur','Dindigul','Cuddalore','Kanchipuram','Nagercoil'],
+  'Telangana': ['Hyderabad','Warangal','Nizamabad','Karimnagar','Ramagundam','Khammam','Mahbubnagar','Nalgonda','Adilabad','Suryapet','Siddipet','Miryalaguda'],
+  'Tripura': ['Agartala','Udaipur','Dharmanagar'],
+  'Uttar Pradesh': ['Lucknow','Kanpur','Agra','Varanasi','Meerut','Allahabad','Ghaziabad','Noida','Bareilly','Aligarh','Moradabad','Saharanpur','Gorakhpur','Faizabad','Jhansi'],
+  'Uttarakhand': ['Dehradun','Haridwar','Roorkee','Haldwani','Rishikesh','Kashipur','Rudrapur'],
+  'West Bengal': ['Kolkata','Howrah','Asansol','Siliguri','Durgapur','Bardhaman','Malda','Baharampur','Habra'],
+  'Andaman & Nicobar Islands': ['Port Blair','Diglipur','Rangat'],
+  'Chandigarh': ['Chandigarh'],
+  'Dadra & Nagar Haveli and Daman & Diu': ['Silvassa','Daman','Diu'],
+  'Delhi': ['New Delhi','North Delhi','South Delhi','East Delhi','West Delhi','Central Delhi','Dwarka','Rohini','Janakpuri','Laxmi Nagar'],
+  'Jammu & Kashmir': ['Srinagar','Jammu','Anantnag','Baramulla','Sopore','Udhampur'],
+  'Ladakh': ['Leh','Kargil'],
+  'Lakshadweep': ['Kavaratti','Agatti'],
+  'Puducherry': ['Puducherry','Karaikal','Mahe','Yanam']
+};
+
+const indiaPincodes = {
+  'Visakhapatnam':['530001','530002','530003','530004','530016','530017','530022','530026'],
+  'Vijayawada':['520001','520002','520003','520004','520007','520010'],
+  'Guntur':['522001','522002','522003','522004','522006'],
+  'Hyderabad':['500001','500002','500003','500004','500005','500006','500007','500008','500016','500018','500028','500032','500033','500034','500038'],
+  'Warangal':['506001','506002','506003','506004','506005'],
+  'Chennai':['600001','600002','600003','600004','600005','600006','600007','600008','600010','600011','600017','600018','600020','600025','600028','600030','600040'],
+  'Coimbatore':['641001','641002','641003','641004','641005','641006','641007','641011','641012','641018'],
+  'Madurai':['625001','625002','625003','625004','625005','625006','625007','625009','625010'],
+  'Mumbai':['400001','400002','400003','400004','400005','400006','400007','400008','400009','400010','400011','400012','400013','400014','400015','400016','400017','400018','400019','400020'],
+  'Pune':['411001','411002','411003','411004','411005','411006','411007','411008','411009','411010','411011','411012','411013','411014','411015','411016'],
+  'Nagpur':['440001','440002','440003','440004','440005','440006','440007','440008','440009','440010'],
+  'Bengaluru':['560001','560002','560003','560004','560005','560006','560007','560008','560009','560010','560011','560012','560013','560016','560017','560018','560020','560025','560027','560029','560030','560032','560034','560037','560040','560043','560045','560050','560051','560052','560054','560055','560056','560060','560062','560064','560066','560068','560070','560076','560078','560079','560080','560085','560086','560089','560092','560094','560095','560097','560098','560099','560100','560102','560103','560104','560105','560107'],
+  'Mysuru':['570001','570002','570003','570004','570005','570006','570007','570008','570009','570010'],
+  'Delhi':['110001','110002','110003','110004','110005','110006','110007','110008','110009','110010','110011','110012','110013','110014','110015','110016','110017','110018','110019','110020'],
+  'New Delhi':['110001','110003','110011','110021','110023','110024','110025'],
+  'Ahmedabad':['380001','380002','380003','380004','380005','380006','380007','380008','380009','380010','380013','380014','380015','380016','380018','380019','380021','380022','380023','380024','380025','380026','380027'],
+  'Surat':['395001','395002','395003','395004','395005','395006','395007','395008','395009','395010'],
+  'Jaipur':['302001','302002','302003','302004','302005','302006','302007','302008','302009','302010','302011','302012','302015','302016','302017','302018','302019','302020','302021','302022','302023','302024','302025','302026','302027','302028','302029'],
+  'Lucknow':['226001','226002','226003','226004','226005','226006','226007','226008','226009','226010','226011','226012','226014','226015','226016','226017','226018','226019','226020','226021','226022','226023','226024','226025'],
+  'Kolkata':['700001','700002','700003','700004','700005','700006','700007','700008','700009','700010','700011','700012','700013','700014','700015','700016','700017','700018','700019','700020'],
+  'Patna':['800001','800002','800003','800004','800005','800006','800007','800008','800009','800010','800011','800012','800013','800014','800015','800016','800017','800018','800019','800020'],
+  'Bhopal':['462001','462002','462003','462004','462010','462011','462012','462013','462014','462015','462016','462020','462021','462022','462023','462024','462026','462027','462030','462031','462032','462033','462034','462036','462037','462038','462039','462040','462041','462042','462043','462044','462045','462046','462047'],
+  'Indore':['452001','452002','452003','452004','452005','452006','452007','452008','452009','452010','452011','452012','452013','452014','452015','452016','452017','452018','452020'],
+  'Chandigarh':['160001','160002','160003','160004','160005','160006','160007','160008','160009','160010','160011','160012','160014','160015','160016','160017','160018','160019','160020','160022','160023','160025','160026','160030','160031','160035','160036','160047','160055','160059'],
+  'Thiruvananthapuram':['695001','695002','695003','695004','695005','695006','695007','695008','695009','695010','695011','695012','695013','695014','695015','695016','695017','695018','695019','695020','695021','695022','695023','695024','695025','695026','695027','695028','695032'],
+  'Kochi':['682001','682002','682003','682004','682005','682006','682007','682008','682009','682010','682011','682012','682013','682014','682015','682016','682017','682018','682019','682020','682021','682022','682023','682024','682025','682026','682027','682028','682029','682030','682031'],
+  'Amritsar':['143001','143002','143003','143004','143005','143006','143007','143008','143009','143010'],
+  'Ludhiana':['141001','141002','141003','141004','141005','141006','141007','141008','141009','141010'],
+  'Ranchi':['834001','834002','834003','834004','834005','834006','834007','834008','834009','834010'],
+  'Bhubaneswar':['751001','751002','751003','751004','751005','751006','751007','751008','751009','751010','751011','751012','751013','751014','751015','751016','751017','751018','751019','751020','751021','751022','751023','751024','751025','751030','751031'],
+  'Guwahati':['781001','781002','781003','781004','781005','781006','781007','781008','781009','781010','781011','781012','781013','781014'],
+  'Shimla':['171001','171002','171003','171004','171005','171006','171007','171008','171009'],
+  'Dehradun':['248001','248002','248003','248004','248005','248006','248007','248008','248009','248010'],
+  'Puducherry':['605001','605002','605003','605004','605005','605006','605007','605008','605009','605010'],
+  'Agartala':['799001','799002','799003','799004','799005','799006','799007'],
+  'Panaji':['403001','403002','403003','403004','403005','403006'],
+  'Port Blair':['744101','744102','744103','744104','744105','744106'],
+  'Gangtok':['737101','737102','737103','737104','737105'],
+  'Aizawl':['796001','796002','796003','796004','796005'],
+  'Imphal':['795001','795002','795003','795004','795005'],
+  'Kohima':['797001','797002','797003','797004','797005'],
+  'Itanagar':['791111','791112','791113','791114'],
+  'Shillong':['793001','793002','793003','793004','793005','793006','793007','793008','793009','793010'],
+  'Leh':['194101','194102','194103','194104'],
+  'Kargil':['194103','194104','194201','194202']
+};
+
+function loadCities(restoreCity, restorePin) {
+  const state = document.getElementById('pf-state').value;
+  const cityEl = document.getElementById('pf-city');
+  const pinEl = document.getElementById('pf-pin');
+  cityEl.innerHTML = '<option value="">— Select City —</option>';
+  pinEl.innerHTML = '<option value="">— Select City first —</option>';
+  const cities = indiaCities[state] || [];
+  cities.forEach(c => {
+    const o = document.createElement('option');
+    o.value = c; o.textContent = c;
+    cityEl.appendChild(o);
+  });
+  if (restoreCity) {
+    cityEl.value = restoreCity;
+    loadPincodes(restorePin);
+  }
+}
+
+function loadPincodes(restorePin) {
+  const city = document.getElementById('pf-city').value;
+  const pinEl = document.getElementById('pf-pin');
+  pinEl.innerHTML = '<option value="">— Select Pincode —</option>';
+  const pins = indiaPincodes[city] || [];
+  if (!pins.length) {
+    pinEl.innerHTML = '<option value="">Enter manually if not listed</option>';
+    // Allow manual entry as fallback
+    const inp = document.createElement('input');
+    // Just add a generic set of options noting city
+    pinEl.innerHTML = '<option value="">— No pincodes listed —</option>';
+    return;
+  }
+  pins.forEach(p => {
+    const o = document.createElement('option');
+    o.value = p; o.textContent = p;
+    pinEl.appendChild(o);
+  });
+  if (restorePin) pinEl.value = restorePin;
+}
+
 </script>
 </body>
 </html>
