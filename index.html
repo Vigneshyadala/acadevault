@@ -218,7 +218,7 @@ function restoreProfile(p) {
 // ---- FILE UPLOAD — Firestore base64 (free plan, no Storage needed) ----
 window.handleUpload = async function(key) {
   const f = document.getElementById('file-'+key).files[0];
-  if (!f || !currentUser) return;
+  if (!f || !window.currentUser) return;
   if (f.size > 900000) { showToast('⚠️ File too large. Max 900KB per file.', 'warning'); return; }
   showToast('⬆️ Uploading...', 'info');
   const reader = new FileReader();
@@ -235,7 +235,7 @@ window.handleUpload = async function(key) {
 };
 
 window.removeDoc = async function(key) {
-  if (!currentUser) return;
+  if (!window.currentUser) return;
   delete docs[key];
   const v = document.getElementById('view-'+key);
   const d = document.getElementById('drop-'+key);
@@ -247,7 +247,7 @@ window.removeDoc = async function(key) {
 
 window.handleCertUpload = async function() {
   const f = document.getElementById('file-cert').files[0];
-  if (!f || !currentUser) return;
+  if (!f || !window.currentUser) return;
   if (f.size > 900000) { showToast('⚠️ File too large. Max 900KB per cert.', 'warning'); return; }
   showToast('⬆️ Uploading certificate...', 'info');
   const reader = new FileReader();
@@ -264,7 +264,7 @@ window.handleCertUpload = async function() {
 };
 
 window.removeCert = async function(i) {
-  if (!currentUser) return;
+  if (!window.currentUser) return;
   certs.splice(i,1);
   renderCerts(); updateStats();
   await saveUserData();
@@ -627,6 +627,7 @@ input[type=file]{display:none;}
     <button class="nav-item" onclick="showPage('btech')"><span class="nav-icon">🎓</span> B.Tech Semesters</button>
     <div class="nav-sep"></div>
     <button class="nav-item" onclick="showPage('certs')"><span class="nav-icon">🏅</span> Certifications</button>
+    <button class="nav-item" onclick="showPage('aadhaar')"><span class="nav-icon">🪪</span> Aadhaar Card</button>
     <button class="nav-item" onclick="showPage('share')"><span class="nav-icon">🔗</span> Share Access</button>
     <div class="nav-sep"></div>
     <button class="nav-item" onclick="showPage('profile')"><span class="nav-icon">👤</span> My Profile</button>
@@ -673,6 +674,11 @@ input[type=file]{display:none;}
               <div class="file-icon">📄</div>
               <div style="flex:1"><div class="file-name">Intermediate Marksheet</div><div class="file-meta" id="home-inter-meta">Not uploaded</div></div>
               <span class="file-status" id="home-inter-status"></span>
+            </div>
+            <div class="file-item" onclick="showPage('aadhaar')">
+              <div class="file-icon">🪪</div>
+              <div style="flex:1"><div class="file-name">Aadhaar Card</div><div class="file-meta" id="home-aadhaar-meta">Not uploaded</div></div>
+              <span class="file-status" id="home-aadhaar-status"></span>
             </div>
           </div>
         </div>
@@ -730,6 +736,34 @@ input[type=file]{display:none;}
         <input type="file" id="file-cert" accept=".pdf,.jpg,.jpeg,.png" onchange="handleCertUpload()">
         <div id="cert-list" style="display:flex;flex-direction:column;gap:7px;margin-top:8px;">
           <div style="text-align:center;padding:2rem;color:var(--text2);font-size:13px;">No certificates added yet. Click "+ Add Certificate" to get started!</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AADHAAR -->
+    <div id="page-aadhaar" class="hidden">
+      <div class="page-header"><div class="page-title">🪪 Aadhaar Card</div><div class="page-sub">Store your Aadhaar securely — front & back side</div></div>
+      <div class="section-grid">
+        <div class="doc-section" style="max-width:580px;">
+          <div class="section-header"><div class="section-title">Front Side<span class="section-badge badge-blue">Photo Side</span></div><button class="upload-btn" onclick="triggerUpload('aadhaar-front')">+ Upload</button></div>
+          <div id="view-aadhaar-front"></div>
+          <div class="drop-zone" id="drop-aadhaar-front" onclick="triggerUpload('aadhaar-front')"><div class="drop-icon">🪪</div><div>Upload Aadhaar Front Side</div><div style="font-size:10px;margin-top:3px;color:var(--text3);">PDF, JPG, PNG accepted</div></div>
+          <input type="file" id="file-aadhaar-front" accept=".pdf,.jpg,.jpeg,.png" onchange="handleUpload('aadhaar-front')">
+        </div>
+        <div class="doc-section" style="max-width:580px;">
+          <div class="section-header"><div class="section-title">Back Side<span class="section-badge badge-teal">Address Side</span></div><button class="upload-btn" onclick="triggerUpload('aadhaar-back')">+ Upload</button></div>
+          <div id="view-aadhaar-back"></div>
+          <div class="drop-zone" id="drop-aadhaar-back" onclick="triggerUpload('aadhaar-back')"><div class="drop-icon">🪪</div><div>Upload Aadhaar Back Side</div><div style="font-size:10px;margin-top:3px;color:var(--text3);">PDF, JPG, PNG accepted</div></div>
+          <input type="file" id="file-aadhaar-back" accept=".pdf,.jpg,.jpeg,.png" onchange="handleUpload('aadhaar-back')">
+        </div>
+      </div>
+      <div class="doc-section" style="margin-top:1rem;max-width:580px;background:rgba(251,191,36,0.04);border:1px solid rgba(251,191,36,0.2);">
+        <div style="display:flex;align-items:flex-start;gap:12px;padding:4px;">
+          <div style="font-size:22px;">🔒</div>
+          <div>
+            <div style="font-size:13px;font-weight:600;color:#fbbf24;margin-bottom:4px;">Security Notice</div>
+            <div style="font-size:12px;color:var(--text2);line-height:1.6;">Your Aadhaar is stored encrypted in Firebase and is only visible to you. No one else — including the developer — can access your documents.</div>
+          </div>
         </div>
       </div>
     </div>
@@ -893,9 +927,9 @@ function switchTab(t){
 }
 
 function showPage(p){
-  ['home','10th','inter','btech','certs','share','profile'].forEach(id=>{const el=document.getElementById('page-'+id);if(el)el.classList.add('hidden');});
+  ['home','10th','inter','btech','certs','aadhaar','share','profile'].forEach(id=>{const el=document.getElementById('page-'+id);if(el)el.classList.add('hidden');});
   const pg=document.getElementById('page-'+p);if(pg)pg.classList.remove('hidden');
-  const pages=['home','10th','inter','btech','certs','share','profile'];
+  const pages=['home','10th','inter','btech','certs','aadhaar','share','profile'];
   document.querySelectorAll('.nav-item').forEach((b,i)=>{b.classList.toggle('active',pages[i]===p);});
   if(p==='home'){updateStats();renderHomeSems();updateHomeMeta();}
   if(p==='profile'){loadProfileFields();}
@@ -903,36 +937,100 @@ function showPage(p){
 
 function triggerUpload(key){document.getElementById('file-'+key).click();}
 
+function previewDoc(data, name, type) {
+  // Create full-screen preview modal
+  let modal = document.getElementById('preview-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'preview-modal';
+    modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.92);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;';
+    modal.innerHTML = `
+      <div style="width:92%;max-width:860px;height:88vh;background:var(--bg2);border-radius:16px;border:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);flex-shrink:0;">
+          <div id="preview-title" style="font-size:13px;font-weight:600;color:var(--text);"></div>
+          <div style="display:flex;gap:8px;">
+            <a id="preview-download-btn" style="background:var(--accent);color:#000;border:none;border-radius:8px;padding:7px 16px;font-size:12px;font-weight:600;cursor:pointer;text-decoration:none;">⬇ Download</a>
+            <button onclick="document.getElementById('preview-modal').style.display='none'" style="background:rgba(251,113,133,0.15);border:1px solid rgba(251,113,133,0.3);color:var(--rose);border-radius:8px;padding:7px 14px;font-size:12px;cursor:pointer;">✕ Close</button>
+          </div>
+        </div>
+        <div id="preview-body" style="flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:16px;"></div>
+      </div>`;
+    document.body.appendChild(modal);
+  }
+  modal.style.display = 'flex';
+  document.getElementById('preview-title').textContent = '📄 ' + name;
+  const dlBtn = document.getElementById('preview-download-btn');
+  dlBtn.href = data;
+  dlBtn.download = name;
+  const body = document.getElementById('preview-body');
+  if (type && type.startsWith('image/')) {
+    body.innerHTML = `<img src="${data}" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;">`;
+  } else {
+    body.innerHTML = `<iframe src="${data}" style="width:100%;height:100%;border:none;border-radius:8px;"></iframe>`;
+  }
+}
+
+function downloadDoc(data, name) {
+  const a = document.createElement('a');
+  a.href = data;
+  a.download = name;
+  a.click();
+}
+
 function renderDoc(key){
   const d=docs[key];
   const viewEl=document.getElementById('view-'+key);
   const dropEl=document.getElementById('drop-'+key);
   if(!d||!viewEl)return;
   if(dropEl)dropEl.style.display='none';
+  const src = d.url||d.data;
   let preview='';
   if(d.type&&d.type.startsWith('image/')){
-    preview=`<img src="${d.url||d.data}" style="width:100%;max-height:180px;object-fit:cover;border-radius:10px;margin-bottom:10px;">`;
+    preview=`<img src="${src}" onclick="previewDoc('${src}','${d.name}','${d.type}')" style="width:100%;max-height:200px;object-fit:cover;border-radius:10px;margin-bottom:10px;cursor:pointer;transition:opacity 0.2s;" onmouseover="this.style.opacity=0.85" onmouseout="this.style.opacity=1" title="Click to preview">`;
   }else{
-    preview=`<div style="background:rgba(56,189,248,0.06);border-radius:10px;padding:1.8rem;text-align:center;margin-bottom:10px;border:1px solid rgba(56,189,248,0.12);"><div style="font-size:36px;margin-bottom:6px;">📄</div><div style="font-size:12px;color:var(--teal);">PDF Document Ready</div></div>`;
+    preview=`<div onclick="previewDoc('${src}','${d.name}','${d.type}')" style="background:rgba(56,189,248,0.06);border-radius:10px;padding:1.8rem;text-align:center;margin-bottom:10px;border:1px solid rgba(56,189,248,0.2);cursor:pointer;transition:all 0.2s;" onmouseover="this.style.background='rgba(56,189,248,0.12)'" onmouseout="this.style.background='rgba(56,189,248,0.06)'" title="Click to preview"><div style="font-size:36px;margin-bottom:6px;">📄</div><div style="font-size:12px;color:var(--teal);">Click to Preview PDF</div></div>`;
   }
-  viewEl.innerHTML=`${preview}<div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg3);padding:10px 14px;border-radius:10px;border:1px solid rgba(45,212,191,0.25);">
-    <div><div style="font-size:12px;font-weight:500;color:var(--teal);">✅ ${d.name}</div><div style="font-size:10px;color:var(--text2);">${d.size} · Uploaded ${d.date}</div></div>
-    <div style="display:flex;gap:6px;"><a href="${d.url||d.data}" target="_blank" style="background:var(--bg4);border:1px solid var(--border);color:var(--accent);border-radius:6px;padding:5px 10px;font-size:10px;cursor:pointer;text-decoration:none;">⬇ Download</a>
-    <button onclick="removeDoc('${key}')" style="background:rgba(251,113,133,0.1);border:1px solid rgba(251,113,133,0.25);color:var(--rose);border-radius:6px;padding:5px 10px;font-size:10px;cursor:pointer;">Remove</button></div>
+  viewEl.innerHTML=`${preview}
+  <div style="background:var(--bg3);padding:10px 14px;border-radius:10px;border:1px solid rgba(45,212,191,0.25);">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+      <div><div style="font-size:12px;font-weight:500;color:var(--teal);">✅ ${d.name}</div><div style="font-size:10px;color:var(--text2);">${d.size} · Uploaded ${d.date}</div></div>
+      <div style="display:flex;gap:6px;">
+        <button onclick="previewDoc('${src}','${d.name}','${d.type}')" style="background:rgba(56,189,248,0.12);border:1px solid rgba(56,189,248,0.3);color:var(--accent);border-radius:6px;padding:6px 12px;font-size:11px;cursor:pointer;font-weight:500;">👁 Preview</button>
+        <button onclick="downloadDoc('${src}','${d.name}')" style="background:rgba(45,212,191,0.12);border:1px solid rgba(45,212,191,0.3);color:var(--teal);border-radius:6px;padding:6px 12px;font-size:11px;cursor:pointer;font-weight:500;">⬇ Download</button>
+        <button onclick="removeDoc('${key}')" style="background:rgba(251,113,133,0.1);border:1px solid rgba(251,113,133,0.25);color:var(--rose);border-radius:6px;padding:6px 12px;font-size:11px;cursor:pointer;">🗑 Remove</button>
+      </div>
+    </div>
   </div>`;
 }
 
 function renderCerts(){
   const el=document.getElementById('cert-list');
   if(!certs.length){el.innerHTML='<div style="text-align:center;padding:2rem;color:var(--text2);font-size:13px;">No certificates added yet. Click "+ Add Certificate" to get started!</div>';return;}
-  el.innerHTML=certs.map((c,i)=>`<div class="file-item"><div class="file-icon">🏅</div><div style="flex:1"><div class="file-name">${c.name}</div><div class="file-meta">${c.size} · ${c.date}</div></div><a href="${c.url||c.data}" target="_blank" style="background:var(--bg4);border:1px solid var(--border);color:var(--accent);border-radius:6px;padding:5px 10px;font-size:10px;text-decoration:none;margin-right:5px;">⬇</a><button onclick="removeCert(${i})" style="background:rgba(251,113,133,0.1);border:1px solid rgba(251,113,133,0.25);color:var(--rose);border-radius:6px;padding:5px 10px;font-size:10px;cursor:pointer;">✕</button></div>`).join('');
+  el.innerHTML=certs.map((c,i)=>{
+    const src=c.url||c.data;
+    const isImg=c.type&&c.type.startsWith('image/');
+    const previewThumb=isImg?`<img src="${src}" style="width:48px;height:48px;object-fit:cover;border-radius:8px;margin-right:12px;cursor:pointer;border:1px solid rgba(56,189,248,0.2);" onclick="previewDoc('${src}','${c.name}','${c.type}')" title="Preview">`:`<div onclick="previewDoc('${src}','${c.name}','${c.type}')" style="width:48px;height:48px;border-radius:8px;background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.2);display:flex;align-items:center;justify-content:center;font-size:22px;margin-right:12px;cursor:pointer;flex-shrink:0;" title="Preview">📄</div>`;
+    return `<div class="file-item" style="align-items:center;">
+      ${previewThumb}
+      <div style="flex:1;min-width:0;">
+        <div class="file-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${c.name}</div>
+        <div class="file-meta">${c.size} · ${c.date}</div>
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0;margin-left:8px;">
+        <button onclick="previewDoc('${src}','${c.name}','${c.type}')" style="background:rgba(56,189,248,0.12);border:1px solid rgba(56,189,248,0.3);color:var(--accent);border-radius:6px;padding:6px 10px;font-size:11px;cursor:pointer;font-weight:500;">👁 Preview</button>
+        <button onclick="downloadDoc('${src}','${c.name}')" style="background:rgba(45,212,191,0.12);border:1px solid rgba(45,212,191,0.3);color:var(--teal);border-radius:6px;padding:6px 10px;font-size:11px;cursor:pointer;font-weight:500;">⬇ Download</button>
+        <button onclick="removeCert(${i})" style="background:rgba(251,113,133,0.1);border:1px solid rgba(251,113,133,0.25);color:var(--rose);border-radius:6px;padding:6px 10px;font-size:11px;cursor:pointer;">🗑</button>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function updateStats(){
   const semKeys=['sem1','sem2','sem3','sem4','sem5','sem6','sem7','sem8'];
   const su=semKeys.filter(k=>docs[k]).length;
-  const total=(docs['10th']?1:0)+(docs['inter']?1:0)+su+certs.length;
-  const pct=Math.round((total/12)*100);
+  const aadhaarCount=(docs['aadhaar-front']?1:0)+(docs['aadhaar-back']?1:0);
+  const total=(docs['10th']?1:0)+(docs['inter']?1:0)+su+certs.length+aadhaarCount;
+  const pct=Math.round((total/14)*100);
   document.getElementById('stat-total').textContent=total;
   document.getElementById('stat-complete').textContent=pct+'%';
   document.getElementById('stat-sems').textContent=su+'/8';
@@ -948,10 +1046,16 @@ function renderHomeSems(){
 function updateHomeMeta(){
   const s10=document.getElementById('home-10th-status');const m10=document.getElementById('home-10th-meta');
   const si=document.getElementById('home-inter-status');const mi=document.getElementById('home-inter-meta');
+  const sa=document.getElementById('home-aadhaar-status');const ma=document.getElementById('home-aadhaar-meta');
   if(docs['10th']){s10.textContent='Uploaded';s10.className='file-status status-ok';m10.textContent=docs['10th'].date;}
   else{s10.textContent='Pending';s10.className='file-status status-empty';m10.textContent='Not uploaded';}
   if(docs['inter']){si.textContent='Uploaded';si.className='file-status status-ok';mi.textContent=docs['inter'].date;}
   else{si.textContent='Pending';si.className='file-status status-empty';mi.textContent='Not uploaded';}
+  if(sa){
+    const hasAadhaar=docs['aadhaar-front']||docs['aadhaar-back'];
+    if(hasAadhaar){sa.textContent='Uploaded';sa.className='file-status status-ok';ma.textContent=(docs['aadhaar-front']&&docs['aadhaar-back'])?'Both sides uploaded':'1 side uploaded';}
+    else{sa.textContent='Pending';sa.className='file-status status-empty';ma.textContent='Not uploaded';}
+  }
 }
 
 function generateLink(){
