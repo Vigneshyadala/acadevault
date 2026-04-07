@@ -1151,24 +1151,34 @@ function previewDoc(data, name, type) {
   modal.style.display = 'flex';
   document.getElementById('preview-title').textContent = '📄 ' + name;
   const dlBtn = document.getElementById('preview-download-btn');
-  dlBtn.href = data;
   dlBtn.download = name;
   const body = document.getElementById('preview-body');
-  if (type && type.startsWith('image/')) {
-    body.innerHTML = `<img src="${data}" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;">`;
-  } else {
-    // Convert base64 to blob URL for PDF — works on mobile
-    try {
-      const base64 = data.split(',')[1];
-      const binary = atob(base64);
-      const arr = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
-      const blob = new Blob([arr], {type: 'application/pdf'});
-      const blobUrl = URL.createObjectURL(blob);
-      dlBtn.href = blobUrl;
+
+  // Detect type from data URL prefix OR from type param
+  const mimeFromData = data.match(/^data:([^;]+);/);
+  const detectedMime = (mimeFromData && mimeFromData[1]) || type || '';
+  const isImage = detectedMime.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(name);
+
+  try {
+    const base64 = data.split(',')[1];
+    const binary = atob(base64);
+    const arr = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+    const mime = detectedMime || (isImage ? 'image/jpeg' : 'application/pdf');
+    const blob = new Blob([arr], {type: mime});
+    const blobUrl = URL.createObjectURL(blob);
+    dlBtn.href = blobUrl;
+    if (isImage) {
+      body.innerHTML = `<img src="${blobUrl}" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;">`;
+    } else {
       body.innerHTML = `<iframe src="${blobUrl}" style="width:100%;height:100%;border:none;border-radius:8px;"></iframe>`;
-    } catch(e) {
-      // fallback for non-base64 (shouldn't happen but safe)
+    }
+  } catch(e) {
+    // fallback
+    dlBtn.href = data;
+    if (isImage) {
+      body.innerHTML = `<img src="${data}" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;">`;
+    } else {
       body.innerHTML = `<iframe src="${data}" style="width:100%;height:100%;border:none;border-radius:8px;"></iframe>`;
     }
   }
