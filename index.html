@@ -173,6 +173,8 @@ async function loadUserData() {
       Object.keys(docs).forEach(key => { if(docs[key]) renderDoc(key); });
       renderCerts(); updateStats(); renderHomeSems(); updateHomeMeta();
       if (data.profile) restoreProfile(data.profile);
+      // Restore billing
+      if (data.billing) { billingEntries = data.billing; renderBilling(); }
       // Restore profile photo
       if (data.profilePhoto) {
         const ab = document.getElementById('profile-avatar-big');
@@ -423,8 +425,11 @@ function updateStats(){
   const semKeys=['sem1','sem2','sem3','sem4','sem5','sem6','sem7','sem8'];
   const su=semKeys.filter(k=>docs[k]).length;
   const aadhaarCount=(docs['aadhaar-front']?1:0)+(docs['aadhaar-back']?1:0);
-  const total=(docs['10th']?1:0)+(docs['inter']?1:0)+su+certs.length+aadhaarCount;
-  const pct=Math.round((total/14)*100);
+  const idCardCount=(docs['idcard-front']?1:0)+(docs['idcard-back']?1:0);
+  const projectCount=(docs['mini-report']?1:0)+(docs['mini-ppt']?1:0)+(docs['major-report']?1:0)+(docs['major-ppt']?1:0);
+  const total=(docs['10th']?1:0)+(docs['inter']?1:0)+su+certs.length+aadhaarCount+idCardCount+projectCount;
+  const maxDocs=18; // updated total
+  const pct=Math.min(100,Math.round((total/maxDocs)*100));
   const el1=document.getElementById('stat-total');if(el1)el1.textContent=total;
   const el2=document.getElementById('stat-complete');if(el2)el2.textContent=pct+'%';
   const el3=document.getElementById('stat-sems');if(el3)el3.textContent=su+'/8';
@@ -446,8 +451,87 @@ function updateHomeMeta(){
   if(s10){if(docs['10th']){s10.textContent='Uploaded';s10.className='file-status status-ok';if(m10)m10.textContent=docs['10th'].date;}else{s10.textContent='Pending';s10.className='file-status status-empty';if(m10)m10.textContent='Not uploaded';}}
   if(si){if(docs['inter']){si.textContent='Uploaded';si.className='file-status status-ok';if(mi)mi.textContent=docs['inter'].date;}else{si.textContent='Pending';si.className='file-status status-empty';if(mi)mi.textContent='Not uploaded';}}
   if(sa){const hasAadhaar=docs['aadhaar-front']||docs['aadhaar-back'];if(hasAadhaar){sa.textContent='Uploaded';sa.className='file-status status-ok';if(ma)ma.textContent=(docs['aadhaar-front']&&docs['aadhaar-back'])?'Both sides uploaded':'1 side uploaded';}else{sa.textContent='Pending';sa.className='file-status status-empty';if(ma)ma.textContent='Not uploaded';}}
+  // ID Card
+  const sid=document.getElementById('home-idcard-status');const mid=document.getElementById('home-idcard-meta');
+  if(sid){const hasId=docs['idcard-front']||docs['idcard-back'];if(hasId){sid.textContent='Uploaded';sid.className='file-status status-ok';if(mid)mid.textContent=(docs['idcard-front']&&docs['idcard-back'])?'Both sides uploaded':'1 side uploaded';}else{sid.textContent='Pending';sid.className='file-status status-empty';if(mid)mid.textContent='Not uploaded';}}
+  // Projects
+  const spr=document.getElementById('home-projects-status');const mpr=document.getElementById('home-projects-meta');
+  if(spr){const projectCount=(docs['mini-report']?1:0)+(docs['mini-ppt']?1:0)+(docs['major-report']?1:0)+(docs['major-ppt']?1:0);if(projectCount>0){spr.textContent=projectCount+'/4';spr.className='file-status status-ok';if(mpr)mpr.textContent=projectCount+' file(s) uploaded';}else{spr.textContent='Pending';spr.className='file-status status-empty';if(mpr)mpr.textContent='Not uploaded';}}
+  // Billing
+  const sbl=document.getElementById('home-billing-status');const mbl=document.getElementById('home-billing-meta');
+  if(sbl){if(billingEntries&&billingEntries.length>0){sbl.textContent=billingEntries.length+' bill'+(billingEntries.length!==1?'s':'');sbl.className='file-status status-ok';if(mbl)mbl.textContent=billingEntries.length+' record(s)';}else{sbl.textContent='Empty';sbl.className='file-status status-empty';if(mbl)mbl.textContent='No records';}}
 }
 window.updateHomeMeta = updateHomeMeta;
+
+// ---- BILLING ----
+let billingEntries = [];
+
+window.toggleBillingForm = function(){
+  const f=document.getElementById('billing-form');
+  if(f) f.style.display = f.style.display==='none'?'block':'none';
+};
+
+window.addBillEntry = async function(){
+  const no=document.getElementById('bill-no')?.value.trim();
+  const item=document.getElementById('bill-item')?.value.trim();
+  const date=document.getElementById('bill-date')?.value;
+  const amount=parseFloat(document.getElementById('bill-amount')?.value)||0;
+  const outstanding=parseFloat(document.getElementById('bill-outstanding')?.value)||0;
+  const status=document.getElementById('bill-status')?.value||'pending';
+  if(!item){showToast('⚠️ Please enter a Bill Item.','warning');return;}
+  billingEntries.push({no,item,date,amount,outstanding,status,id:'b_'+Date.now()});
+  renderBilling();
+  // clear form
+  ['bill-no','bill-item','bill-date','bill-amount','bill-outstanding'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  document.getElementById('bill-outstanding').value='0';
+  document.getElementById('billing-form').style.display='none';
+  await saveBillingData();
+  showToast('✅ Bill entry added!','success');
+};
+
+window.removeBillEntry = async function(id){
+  billingEntries = billingEntries.filter(b=>b.id!==id);
+  renderBilling();
+  await saveBillingData();
+  showToast('🗑️ Bill entry removed.','info');
+};
+
+async function saveBillingData(){
+  if(!currentUser) return;
+  try{ await setDoc(doc(db,'users',currentUser.uid),{billing:billingEntries},{merge:true}); }
+  catch(e){ console.error('Billing save error:',e); }
+}
+
+function renderBilling(){
+  const tbody=document.getElementById('billing-tbody');
+  const badge=document.getElementById('billing-count-badge');
+  const totalPaid=document.getElementById('billing-total-paid');
+  if(!tbody) return;
+  if(!billingEntries.length){
+    tbody.innerHTML='<tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text2);font-size:13px;">No billing records yet. Click "+ Add Bill" to get started!</td></tr>';
+    if(badge) badge.textContent='0 Bills';
+    if(totalPaid) totalPaid.textContent='₹0';
+    return;
+  }
+  let paid=0;
+  billingEntries.forEach(b=>{ if(b.status==='settled') paid+=b.amount; });
+  if(badge) badge.textContent=billingEntries.length+' Bill'+(billingEntries.length!==1?'s':'');
+  if(totalPaid) totalPaid.textContent='₹'+paid.toLocaleString('en-IN');
+  tbody.innerHTML=billingEntries.map(b=>{
+    const statusCls=b.status==='settled'?'status-settled':b.status==='cancelled'?'status-cancelled':'status-pending';
+    const dateStr=b.date?new Date(b.date).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—';
+    return `<tr>
+      <td style="color:var(--text2);font-family:monospace;">${b.no||'—'}</td>
+      <td style="font-weight:500;">${b.item}</td>
+      <td>${dateStr}</td>
+      <td style="color:var(--accent);font-weight:600;">₹${(b.amount||0).toLocaleString('en-IN')}</td>
+      <td style="color:${(b.outstanding||0)>0?'var(--rose)':'var(--green)'};">₹${(b.outstanding||0).toLocaleString('en-IN')}</td>
+      <td><span class="${statusCls}">${b.status.charAt(0).toUpperCase()+b.status.slice(1)}</span></td>
+      <td><button onclick="removeBillEntry('${b.id}')" style="background:rgba(251,113,133,0.1);border:1px solid rgba(251,113,133,0.25);color:var(--rose);border-radius:6px;padding:4px 8px;font-size:10px;cursor:pointer;">🗑</button></td>
+    </tr>`;
+  }).join('');
+}
+window.renderBilling = renderBilling;
 
 </script>
 
@@ -666,14 +750,15 @@ input[type=file]{display:none;}
 
 /* ===== MOBILE RESPONSIVE ===== */
 @media (max-width: 768px) {
-  .sidebar{width:100%;height:auto;position:relative;flex-direction:row;flex-wrap:wrap;padding:0.8rem;gap:2px;border-right:none;border-bottom:1px solid var(--border);}
-  .logo{margin-bottom:0;font-size:0.9rem;}
+  #dashboard{display:flex!important;flex-direction:column;min-height:100vh;}
+  .sidebar{width:100%;height:auto;position:sticky;top:0;z-index:100;flex-direction:row;flex-wrap:wrap;padding:0.5rem 0.6rem;gap:2px;border-right:none;border-bottom:1px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .logo{margin-bottom:0;font-size:0.85rem;flex-shrink:0;}
   .logo-sub{display:none;}
   .sidebar-footer{display:none;}
   .nav-sep{display:none;}
-  .nav-item{padding:6px 8px;font-size:11px;gap:5px;}
-  .nav-icon{font-size:13px;width:16px;}
-  .main{margin-left:0;padding:1rem;}
+  .nav-item{padding:5px 7px;font-size:10px;gap:4px;flex-shrink:0;white-space:nowrap;}
+  .nav-icon{font-size:12px;width:14px;}
+  .main{margin-left:0;padding:0.8rem;flex:1;}
   .stats-grid{grid-template-columns:repeat(2,1fr);}
   .section-grid{grid-template-columns:1fr;}
   .profile-grid{grid-template-columns:1fr;}
@@ -682,11 +767,12 @@ input[type=file]{display:none;}
   .profile-tags{flex-wrap:wrap;}
   .login-card{padding:1.5rem;}
   .login-title{font-size:1.4rem;}
-  #dashboard{display:flex;flex-direction:column;}
 }
 @media (max-width: 480px) {
   .stats-grid{grid-template-columns:repeat(2,1fr);}
-  .nav-item span:not(.nav-icon){display:none;}
+  .sidebar{gap:1px;padding:0.4rem 0.5rem;}
+  .nav-item{padding:5px 6px;font-size:9px;}
+  .nav-item span:not(.nav-icon){font-size:9px;}
 }
 
 
@@ -699,24 +785,16 @@ input[type=file]{display:none;}
 .forgot-link:hover{color:var(--accent2);}
 .verify-banner{background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);border-radius:10px;padding:10px 14px;font-size:12px;color:var(--gold);margin-bottom:1rem;display:flex;align-items:center;gap:8px;}
 
-/* Mobile responsive */
-@media(max-width:768px){
-  .sidebar{width:100%;height:auto;position:relative;flex-direction:row;flex-wrap:wrap;padding:0.8rem;gap:2px;border-right:none;border-bottom:1px solid var(--border);}
-  .logo{margin-bottom:0;font-size:0.9rem;}
-  .logo-sub{display:none;}
-  .sidebar-footer{display:none;}
-  .nav-sep{display:none;}
-  .nav-item{padding:6px 8px;font-size:11px;gap:5px;}
-  .main{margin-left:0;padding:1rem;}
-  .stats-grid{grid-template-columns:repeat(2,1fr);}
-  .section-grid{grid-template-columns:1fr;}
-  .profile-grid{grid-template-columns:1fr;}
-  .profile-hero-inner{flex-direction:column;align-items:flex-start;gap:1rem;}
-  #dashboard{display:flex;flex-direction:column;}
-}
-@media(max-width:480px){
-  .nav-item span:not(.nav-icon){display:none;}
-}
+/* billing table responsive */
+.billing-table{width:100%;border-collapse:collapse;font-size:12px;}
+.billing-table th{background:rgba(56,189,248,0.07);color:var(--text2);font-size:10px;text-transform:uppercase;letter-spacing:0.06em;padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;}
+.billing-table td{padding:9px 10px;border-bottom:1px solid var(--border);color:var(--text);}
+.billing-table tr:last-child td{border-bottom:none;}
+.billing-table tr:hover td{background:rgba(56,189,248,0.03);}
+.status-settled{background:rgba(74,222,128,0.12);color:var(--green);border:1px solid rgba(74,222,128,0.25);padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;}
+.status-pending{background:rgba(251,191,36,0.12);color:var(--gold);border:1px solid rgba(251,191,36,0.25);padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;}
+.status-cancelled{background:rgba(251,113,133,0.1);color:var(--rose);border:1px solid rgba(251,113,133,0.25);padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;}
+@media(max-width:600px){.billing-table td:nth-child(3),.billing-table th:nth-child(3){display:none;}.billing-table{font-size:11px;}}
 </style>
 </head>
 <body>
@@ -794,6 +872,9 @@ input[type=file]{display:none;}
     <button class="nav-item" onclick="showPage('btech')"><span class="nav-icon">🎓</span> B.Tech Semesters</button>
     <div class="nav-sep"></div>
     <button class="nav-item" onclick="showPage('certs')"><span class="nav-icon">🏅</span> Certifications</button>
+    <button class="nav-item" onclick="showPage('idcard')"><span class="nav-icon">🪪</span> ID Card</button>
+    <button class="nav-item" onclick="showPage('projects')"><span class="nav-icon">📁</span> Projects</button>
+    <button class="nav-item" onclick="showPage('billing')"><span class="nav-icon">💳</span> Billing</button>
     <button class="nav-item" onclick="showPage('aadhaar')"><span class="nav-icon">🪪</span> Aadhaar Card</button>
     <button class="nav-item" onclick="showPage('share')"><span class="nav-icon">🔗</span> Share Access</button>
     <div class="nav-sep"></div>
@@ -847,6 +928,21 @@ input[type=file]{display:none;}
               <div class="file-icon">🪪</div>
               <div style="flex:1"><div class="file-name">Aadhaar Card</div><div class="file-meta" id="home-aadhaar-meta">Not uploaded</div></div>
               <span class="file-status" id="home-aadhaar-status"></span>
+            </div>
+            <div class="file-item" onclick="showPage('idcard')">
+              <div class="file-icon">🪪</div>
+              <div style="flex:1"><div class="file-name">College ID Card</div><div class="file-meta" id="home-idcard-meta">Not uploaded</div></div>
+              <span class="file-status" id="home-idcard-status"></span>
+            </div>
+            <div class="file-item" onclick="showPage('projects')">
+              <div class="file-icon">📁</div>
+              <div style="flex:1"><div class="file-name">Projects (Mini & Major)</div><div class="file-meta" id="home-projects-meta">Not uploaded</div></div>
+              <span class="file-status" id="home-projects-status"></span>
+            </div>
+            <div class="file-item" onclick="showPage('billing')">
+              <div class="file-icon">💳</div>
+              <div style="flex:1"><div class="file-name">Billing Records</div><div class="file-meta" id="home-billing-meta">No records</div></div>
+              <span class="file-status" id="home-billing-status"></span>
             </div>
           </div>
         </div>
@@ -935,6 +1031,106 @@ input[type=file]{display:none;}
             <div style="font-size:13px;font-weight:600;color:#fbbf24;margin-bottom:4px;">Security Notice</div>
             <div style="font-size:12px;color:var(--text2);line-height:1.6;">Your Aadhaar is stored encrypted in Firebase and is only visible to you. No one else — including the developer — can access your documents.</div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ID CARD -->
+    <div id="page-idcard" class="hidden">
+      <div class="page-header"><div class="page-title">🪪 College ID Card</div><div class="page-sub">Store your college ID card — front & back side</div></div>
+      <div class="section-grid">
+        <div class="doc-section" style="max-width:580px;">
+          <div class="section-header"><div class="section-title">Front Side<span class="section-badge badge-blue">Photo Side</span></div><button class="upload-btn" onclick="triggerUpload('idcard-front')">+ Upload</button></div>
+          <div id="view-idcard-front"></div>
+          <div class="drop-zone" id="drop-idcard-front" onclick="triggerUpload('idcard-front')"><div class="drop-icon">🪪</div><div>Upload ID Card Front Side</div><div style="font-size:10px;margin-top:3px;color:var(--text3);">PDF, JPG, PNG accepted</div></div>
+          <input type="file" id="file-idcard-front" accept=".pdf,.jpg,.jpeg,.png" onchange="handleUpload('idcard-front')">
+        </div>
+        <div class="doc-section" style="max-width:580px;">
+          <div class="section-header"><div class="section-title">Back Side<span class="section-badge badge-teal">Details Side</span></div><button class="upload-btn" onclick="triggerUpload('idcard-back')">+ Upload</button></div>
+          <div id="view-idcard-back"></div>
+          <div class="drop-zone" id="drop-idcard-back" onclick="triggerUpload('idcard-back')"><div class="drop-icon">🪪</div><div>Upload ID Card Back Side</div><div style="font-size:10px;margin-top:3px;color:var(--text3);">PDF, JPG, PNG accepted</div></div>
+          <input type="file" id="file-idcard-back" accept=".pdf,.jpg,.jpeg,.png" onchange="handleUpload('idcard-back')">
+        </div>
+      </div>
+      <div class="doc-section" style="margin-top:1rem;max-width:580px;background:rgba(56,189,248,0.04);border:1px solid rgba(56,189,248,0.2);">
+        <div style="display:flex;align-items:flex-start;gap:12px;padding:4px;">
+          <div style="font-size:22px;">🔒</div>
+          <div><div style="font-size:13px;font-weight:600;color:var(--accent);margin-bottom:4px;">Security Notice</div><div style="font-size:12px;color:var(--text2);line-height:1.6;">Your ID card is stored encrypted in Firebase and is only visible to you.</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PROJECTS -->
+    <div id="page-projects" class="hidden">
+      <div class="page-header"><div class="page-title">📁 Projects</div><div class="page-sub">Mini & Major project reports and presentations</div></div>
+      <div class="section-grid">
+        <!-- Mini Project Report -->
+        <div class="doc-section">
+          <div class="section-header"><div class="section-title">📄 Mini Project Report<span class="section-badge badge-blue">Report</span></div><button class="upload-btn" onclick="triggerUpload('mini-report')">+ Upload</button></div>
+          <div id="view-mini-report"></div>
+          <div class="drop-zone" id="drop-mini-report" onclick="triggerUpload('mini-report')"><div class="drop-icon">📂</div><div>Upload Mini Project Report</div><div style="font-size:10px;margin-top:3px;color:var(--text3);">PDF, JPG, PNG accepted</div></div>
+          <input type="file" id="file-mini-report" accept=".pdf,.jpg,.jpeg,.png" onchange="handleUpload('mini-report')">
+        </div>
+        <!-- Mini Project PPT -->
+        <div class="doc-section">
+          <div class="section-header"><div class="section-title">📊 Mini Project PPT<span class="section-badge badge-teal">Slides</span></div><button class="upload-btn" onclick="triggerUpload('mini-ppt')">+ Upload</button></div>
+          <div id="view-mini-ppt"></div>
+          <div class="drop-zone" id="drop-mini-ppt" onclick="triggerUpload('mini-ppt')"><div class="drop-icon">📂</div><div>Upload Mini Project PPT</div><div style="font-size:10px;margin-top:3px;color:var(--text3);">PDF, JPG, PNG accepted</div></div>
+          <input type="file" id="file-mini-ppt" accept=".pdf,.jpg,.jpeg,.png" onchange="handleUpload('mini-ppt')">
+        </div>
+        <!-- Major Project Report -->
+        <div class="doc-section">
+          <div class="section-header"><div class="section-title">📄 Major Project Report<span class="section-badge badge-purple">Report</span></div><button class="upload-btn" onclick="triggerUpload('major-report')">+ Upload</button></div>
+          <div id="view-major-report"></div>
+          <div class="drop-zone" id="drop-major-report" onclick="triggerUpload('major-report')"><div class="drop-icon">📂</div><div>Upload Major Project Report</div><div style="font-size:10px;margin-top:3px;color:var(--text3);">PDF, JPG, PNG accepted</div></div>
+          <input type="file" id="file-major-report" accept=".pdf,.jpg,.jpeg,.png" onchange="handleUpload('major-report')">
+        </div>
+        <!-- Major Project PPT -->
+        <div class="doc-section">
+          <div class="section-header"><div class="section-title">📊 Major Project PPT<span class="section-badge badge-gold">Slides</span></div><button class="upload-btn" onclick="triggerUpload('major-ppt')">+ Upload</button></div>
+          <div id="view-major-ppt"></div>
+          <div class="drop-zone" id="drop-major-ppt" onclick="triggerUpload('major-ppt')"><div class="drop-icon">📂</div><div>Upload Major Project PPT</div><div style="font-size:10px;margin-top:3px;color:var(--text3);">PDF, JPG, PNG accepted</div></div>
+          <input type="file" id="file-major-ppt" accept=".pdf,.jpg,.jpeg,.png" onchange="handleUpload('major-ppt')">
+        </div>
+      </div>
+    </div>
+
+    <!-- BILLING -->
+    <div id="page-billing" class="hidden">
+      <div class="page-header"><div class="page-title">💳 Billing Records</div><div class="page-sub">College fee payment history — track all bills</div></div>
+      <div class="doc-section" style="margin-bottom:1.4rem;">
+        <div class="section-header">
+          <div class="section-title">Add Bill Entry <span class="section-badge badge-teal">Manual Entry</span></div>
+          <button class="upload-btn" onclick="toggleBillingForm()">+ Add Bill</button>
+        </div>
+        <div id="billing-form" style="display:none;margin-top:1rem;background:var(--bg3);border-radius:14px;padding:1.2rem;border:1px solid var(--border);">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+            <div><label style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;display:block;margin-bottom:4px;">Bill No.</label><input id="bill-no" placeholder="e.g. 51574" style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-size:13px;outline:none;"></div>
+            <div><label style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;display:block;margin-bottom:4px;">Bill Item</label><input id="bill-item" placeholder="e.g. SEM 1 TUITION FEE" style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-size:13px;outline:none;"></div>
+            <div><label style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;display:block;margin-bottom:4px;">Due Date</label><input id="bill-date" type="date" style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-size:13px;outline:none;"></div>
+            <div><label style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;display:block;margin-bottom:4px;">Amount (₹)</label><input id="bill-amount" type="number" placeholder="e.g. 100000" style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-size:13px;outline:none;"></div>
+            <div><label style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;display:block;margin-bottom:4px;">Outstanding (₹)</label><input id="bill-outstanding" type="number" placeholder="e.g. 0" value="0" style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-size:13px;outline:none;"></div>
+            <div><label style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;display:block;margin-bottom:4px;">Status</label><select id="bill-status" style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-size:13px;outline:none;"><option value="settled">Settled</option><option value="pending">Pending</option><option value="cancelled">Cancelled</option></select></div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button onclick="addBillEntry()" style="background:linear-gradient(135deg,var(--teal),var(--accent));border:none;color:#000;font-weight:700;font-size:12px;padding:8px 18px;border-radius:8px;cursor:pointer;">✅ Add Entry</button>
+            <button onclick="toggleBillingForm()" style="background:rgba(251,113,133,0.1);border:1px solid rgba(251,113,133,0.25);color:var(--rose);font-size:12px;padding:8px 14px;border-radius:8px;cursor:pointer;">Cancel</button>
+          </div>
+        </div>
+      </div>
+      <div class="doc-section">
+        <div class="section-header">
+          <div class="section-title">Fee History <span class="section-badge badge-blue" id="billing-count-badge">0 Bills</span></div>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <span style="font-size:11px;color:var(--text2);">Total Paid:</span>
+            <span style="font-size:13px;font-weight:700;color:var(--green)" id="billing-total-paid">₹0</span>
+          </div>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="billing-table" id="billing-table">
+            <thead><tr><th>Bill No.</th><th>Bill Item</th><th>Due Date</th><th>Amount</th><th>Outstanding</th><th>Status</th><th></th></tr></thead>
+            <tbody id="billing-tbody"><tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text2);font-size:13px;">No billing records yet. Click "+ Add Bill" to get started!</td></tr></tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -1124,12 +1320,17 @@ function switchTab(t){
 }
 
 function showPage(p){
-  ['home','10th','inter','btech','certs','aadhaar','share','profile'].forEach(id=>{const el=document.getElementById('page-'+id);if(el)el.classList.add('hidden');});
+  ['home','10th','inter','btech','certs','idcard','projects','billing','aadhaar','share','profile'].forEach(id=>{const el=document.getElementById('page-'+id);if(el)el.classList.add('hidden');});
   const pg=document.getElementById('page-'+p);if(pg)pg.classList.remove('hidden');
-  const pages=['home','10th','inter','btech','certs','aadhaar','share','profile'];
-  document.querySelectorAll('.nav-item').forEach((b,i)=>{b.classList.toggle('active',pages[i]===p);});
+  const pages=['home','10th','inter','btech','certs','idcard','projects','billing','aadhaar','share','profile'];
+  document.querySelectorAll('.nav-item').forEach(b=>{
+    const onclick=b.getAttribute('onclick')||'';
+    const match=onclick.match(/showPage\('([^']+)'\)/);
+    if(match) b.classList.toggle('active', match[1]===p);
+  });
   if(p==='home'){updateStats();renderHomeSems();updateHomeMeta();}
   if(p==='profile'){loadProfileFields();}
+  if(p==='billing'){renderBilling();}
 }
 
 function triggerUpload(key){document.getElementById('file-'+key).click();}
